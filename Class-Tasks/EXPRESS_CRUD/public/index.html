@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MyShop - E Commerce</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h2>🛒 MyShop</h2>
+    <div class="cart">
+        Cart (<span id="cartCount">0</span>)
+    </div>
+</header>
+
+<section class="products">
+
+    <div class="product">
+        <img src="https://m.media-amazon.com/images/I/61mpMH5TzkL._SL1500_.jpg" alt="Headphones">
+        <h3>Bluetooth Headphones</h3>
+        <p>₹1999</p>
+        <button onclick="addToCart('Bluetooth Headphones',1999)">Add to Cart</button>
+    </div>
+
+    <div class="product">
+        <img src="https://m.media-amazon.com/images/I/61L1ItFgFHL._SL1500_.jpg" alt="Keyboard">
+        <h3>Wireless Keyboard</h3>
+        <p>₹1299</p>
+        <button onclick="addToCart('Wireless Keyboard',1299)">Add to Cart</button>
+    </div>
+
+    <div class="product">
+        <img src="https://m.media-amazon.com/images/I/61UxfXTUyvL._SL1500_.jpg" alt="Mouse">
+        <h3>Wireless Mouse</h3>
+        <p>₹799</p>
+        <button onclick="addToCart('Wireless Mouse',799)">Add to Cart</button>
+    </div>
+
+</section>
+
+<section class="cart-section">
+    <h2>🧾 Cart Items</h2>
+    <ul id="cartItems"></ul>
+</section>
+
+<script src="script.js"></script>
+</body>
+</html>
