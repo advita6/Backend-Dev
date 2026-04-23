@@ -8,7 +8,7 @@ const router = express.Router();
 const { getCache, setCache } = require('../config/redis');
 const { logger } = require('../utils/logger');
 
-const orders = {};
+const Order = require('../models/Order');
 
 // Get order by ID
 router.get('/:orderId', async (req, res, next) => {
@@ -16,13 +16,20 @@ router.get('/:orderId', async (req, res, next) => {
     const { orderId } = req.params;
     const cacheKey = `order:${orderId}`;
     
+    // Try cache first
     let order = await getCache(cacheKey);
+    
     if (!order) {
-      order = orders[orderId];
+      order = await Order.findOne({ orderId }).lean();
     }
     
     if (!order) {
       return res.status(404).json({ error: 'Order not found', orderId });
+    }
+    
+    // Cache if it was a DB hit
+    if (!await getCache(cacheKey)) {
+      await setCache(cacheKey, order, 3600);
     }
     
     res.json({
@@ -45,26 +52,24 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
-    const order = {
+    const newOrder = new Order({
       orderId: `ORD-${Date.now()}`,
       email,
       items,
       total,
-      shippingAddress,
-      status: 'CONFIRMED',
-      createdAt: new Date(),
-      estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
-    };
+      status: 'PENDING',
+    });
     
-    // Save to cache and memory
-    const cacheKey = `order:${order.orderId}`;
-    await setCache(cacheKey, order, 86400); // Cache for 24 hours
-    orders[order.orderId] = order;
+    await newOrder.save();
     
-    logger.info(`Order created: ${order.orderId}`);
+    // Cache the new order
+    const cacheKey = `order:${newOrder.orderId}`;
+    await setCache(cacheKey, newOrder.toObject(), 86400); // Cache for 24 hours
+    
+    logger.info(`Order created: ${newOrder.orderId}`);
     
     res.status(201).json({
-      data: order,
+      data: newOrder,
       message: 'Order created successfully',
       timestamp: new Date().toISOString(),
     });
@@ -90,7 +95,7 @@ router.get('/email/:email', async (req, res, next) => {
       });
     }
     
-    const userOrders = Object.values(orders).filter((o) => o.email === email);
+    const userOrders = await Order.find({ email }).sort({ createdAt: -1 }).lean();
     
     // Cache results
     await setCache(cacheKey, userOrders, 600);
@@ -118,17 +123,19 @@ router.patch('/:orderId/status', async (req, res, next) => {
       return res.status(400).json({ error: 'Status required' });
     }
     
-    const order = orders[orderId];
+    const order = await Order.findOneAndUpdate(
+      { orderId },
+      { status, updatedAt: new Date() },
+      { new: true }
+    );
+    
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    order.status = status;
-    order.updatedAt = new Date();
-    
     // Update cache
     const cacheKey = `order:${orderId}`;
-    await setCache(cacheKey, order, 86400);
+    await setCache(cacheKey, order.toObject(), 86400);
     
     logger.info(`Order ${orderId} status updated to ${status}`);
     

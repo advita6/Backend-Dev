@@ -9,6 +9,7 @@
     "load-test": "autocannon -c 100 -d 30 http://localhost:3000",
     "load-test-heavy": "autocannon -c 500 -d 60 http://localhost:3000",
     "monitor": "node src/monitoring/dashboard.js",
+    "seed": "node src/utils/seed.js",
     "test": "jest --coverage"
   },
   "keywords": [

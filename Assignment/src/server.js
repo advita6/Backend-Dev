@@ -107,6 +107,7 @@ app.get('/metrics', async (req, res) => {
 });
 
 // ============= API ROUTES =============
+app.use('/dashboard', require('./monitoring/dashboard'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/cart', require('./routes/cart'));
 app.use('/api/checkout', require('./routes/checkout'));

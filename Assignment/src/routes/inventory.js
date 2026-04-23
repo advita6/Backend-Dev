@@ -8,12 +8,7 @@ const router = express.Router();
 const { getCache, setCache } = require('../config/redis');
 const { logger } = require('../utils/logger');
 
-// In-memory inventory (in production, use database)
-const inventory = {
-  '1': { productId: '1', available: 1000, reserved: 0 },
-  '2': { productId: '2', available: 500, reserved: 0 },
-  '3': { productId: '3', available: 200, reserved: 0 },
-};
+const Inventory = require('../models/Inventory');
 
 // Get inventory for product
 router.get('/:productId', async (req, res, next) => {
@@ -30,7 +25,7 @@ router.get('/:productId', async (req, res, next) => {
       });
     }
     
-    const item = inventory[productId];
+    const item = await Inventory.findOne({ productId }).lean();
     if (!item) {
       return res.status(404).json({ error: 'Product inventory not found' });
     }
@@ -58,10 +53,10 @@ router.post('/check', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid items array' });
     }
     
-    const availability = items.map((item) => {
-      const inventoryItem = inventory[item.productId];
+    const availability = await Promise.all(items.map(async (item) => {
+      const inventoryItem = await Inventory.findOne({ productId: item.productId });
       const available = inventoryItem
-        ? inventoryItem.available - inventoryItem.reserved >= item.quantity
+        ? (inventoryItem.available - inventoryItem.reserved) >= item.quantity
         : false;
       
       return {
@@ -71,7 +66,7 @@ router.post('/check', async (req, res, next) => {
         availableStock: inventoryItem?.available || 0,
         reservedStock: inventoryItem?.reserved || 0,
       };
-    });
+    }));
     
     const allAvailable = availability.every((item) => item.available);
     
@@ -99,17 +94,17 @@ router.post('/reserve', async (req, res, next) => {
     const failed = [];
     
     for (const item of items) {
-      const inventoryItem = inventory[item.productId];
+      // Use atomic update to prevent race conditions
+      const inventoryItem = await Inventory.findOneAndUpdate(
+        { 
+          productId: item.productId,
+          $expr: { $gte: [{ $subtract: ["$available", "$reserved"] }, item.quantity] }
+        },
+        { $inc: { reserved: item.quantity } },
+        { new: true }
+      );
       
-      if (!inventoryItem) {
-        failed.push({ productId: item.productId, reason: 'Product not found' });
-        continue;
-      }
-      
-      const available = inventoryItem.available - inventoryItem.reserved;
-      
-      if (available >= item.quantity) {
-        inventoryItem.reserved += item.quantity;
+      if (inventoryItem) {
         reserved.push({
           productId: item.productId,
           quantity: item.quantity,
@@ -118,13 +113,14 @@ router.post('/reserve', async (req, res, next) => {
         
         // Update cache
         const cacheKey = `inventory:${item.productId}`;
-        await setCache(cacheKey, inventoryItem, 60);
+        await setCache(cacheKey, inventoryItem.toObject(), 60);
       } else {
+        const currentItem = await Inventory.findOne({ productId: item.productId });
         failed.push({
           productId: item.productId,
           requested: item.quantity,
-          available,
-          reason: 'Insufficient stock',
+          available: currentItem ? (currentItem.available - currentItem.reserved) : 0,
+          reason: currentItem ? 'Insufficient stock' : 'Product not found',
         });
       }
     }
@@ -170,15 +166,21 @@ router.post('/release/:reservationId', async (req, res, next) => {
     
     // Release all items
     for (const item of reservation.items) {
-      const inventoryItem = inventory[item.productId];
+      const inventoryItem = await Inventory.findOneAndUpdate(
+        { productId: item.productId },
+        { $inc: { reserved: -item.quantity } },
+        { new: true }
+      );
+      
       if (inventoryItem) {
-        inventoryItem.reserved = Math.max(0, inventoryItem.reserved - item.quantity);
-        
         // Update cache
         const cacheKey = `inventory:${item.productId}`;
-        await setCache(cacheKey, inventoryItem, 60);
+        await setCache(cacheKey, inventoryItem.toObject(), 60);
       }
     }
+    
+    // Delete reservation from cache
+    await deleteCache(reservationKey);
     
     logger.info(`Reservation ${reservationId} released`);
     
@@ -195,8 +197,9 @@ router.post('/release/:reservationId', async (req, res, next) => {
 });
 
 // Get inventory status
-router.get('/', (req, res) => {
-  const status = Object.values(inventory).map((item) => ({
+router.get('/', async (req, res) => {
+  const allInventory = await Inventory.find().lean();
+  const status = allInventory.map((item) => ({
     ...item,
     percentage: Math.round((item.available / (item.available + item.reserved)) * 100),
   }));

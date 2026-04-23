@@ -10,6 +10,9 @@ const { getCache, deleteCache } = require('../config/redis');
 const { logger } = require('../utils/logger');
 const envConfig = require('../config/env');
 
+const { addToQueue } = require('../services/orderQueue');
+const Order = require('../models/Order');
+
 // Circuit breaker for payment gateway
 class CircuitBreaker {
   constructor(threshold = 5, timeout = 30000) {
@@ -59,7 +62,6 @@ class CircuitBreaker {
 }
 
 const paymentCircuitBreaker = new CircuitBreaker();
-const pendingOrders = [];
 
 // Initiate checkout
 router.post('/initiate', async (req, res, next) => {
@@ -70,15 +72,15 @@ router.post('/initiate', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid cart or sessionId' });
     }
     
-    const order = {
+    const order = new Order({
       orderId: `ORDER-${Date.now()}`,
-      sessionId,
       email,
       items: cart.items,
       total: cart.total,
       status: 'PROCESSING',
-      createdAt: new Date(),
-    };
+    });
+    
+    await order.save();
     
     logger.info(`Checkout initiated for order ${order.orderId}`);
     
@@ -104,7 +106,6 @@ router.post('/pay', async (req, res, next) => {
     }
     
     // Try to process payment with circuit breaker pattern
-    let paymentResult;
     const paymentSuccess = await paymentCircuitBreaker
       .execute(async () => {
         try {
@@ -122,13 +123,14 @@ router.post('/pay', async (req, res, next) => {
         // Payment gateway is down or circuit is open
         logger.warn(`Payment processing failed: ${error.message}. Queueing order...`);
         
-        // Queue order for later processing
-        pendingOrders.push({
+        // Update order status to QUEUED
+        await Order.findOneAndUpdate({ orderId }, { status: 'QUEUED' });
+        
+        // Queue order for later processing using Bull
+        await addToQueue({
           orderId,
           amount,
           paymentMethod,
-          queuedAt: new Date(),
-          attempts: 0,
         });
         
         return null;
@@ -136,6 +138,19 @@ router.post('/pay', async (req, res, next) => {
     
     if (paymentSuccess) {
       logger.info(`Payment processed successfully for order ${orderId}`);
+      
+      // Update order status
+      await Order.findOneAndUpdate(
+        { orderId },
+        { 
+          status: 'COMPLETED',
+          paymentInfo: {
+            transactionId: paymentSuccess.transactionId,
+            method: paymentMethod,
+            timestamp: new Date()
+          }
+        }
+      );
       
       res.json({
         orderId,
@@ -161,15 +176,12 @@ router.post('/pay', async (req, res, next) => {
 });
 
 // Get pending orders queue status
-router.get('/queue/status', (req, res) => {
+router.get('/queue/status', async (req, res) => {
+  const { orderQueue } = require('../services/orderQueue');
+  const jobCounts = await orderQueue.getJobCounts();
+  
   res.json({
-    pendingOrders: pendingOrders.length,
-    orders: pendingOrders.map((o) => ({
-      orderId: o.orderId,
-      amount: o.amount,
-      queuedAt: o.queuedAt,
-      attempts: o.attempts,
-    })),
+    queueStats: jobCounts,
     circuitBreakerState: paymentCircuitBreaker.state,
     timestamp: new Date().toISOString(),
   });

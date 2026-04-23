@@ -8,33 +8,7 @@ const router = express.Router();
 const { getCache, setCache } = require('../config/redis');
 const { logger } = require('../utils/logger');
 
-// Mock product database (in production, would be MongoDB)
-const products = [
-  {
-    id: '1',
-    name: 'Premium Headphones',
-    price: 299.99,
-    description: 'High-quality wireless headphones',
-    stock: 1000,
-    category: 'Electronics',
-  },
-  {
-    id: '2',
-    name: 'Smart Watch',
-    price: 199.99,
-    description: 'Latest smart watch with fitness tracking',
-    stock: 500,
-    category: 'Electronics',
-  },
-  {
-    id: '3',
-    name: '4K Monitor',
-    price: 599.99,
-    description: 'Ultra HD 4K professional monitor',
-    stock: 200,
-    category: 'Electronics',
-  },
-];
+const Product = require('../models/Product');
 
 // Get all products (cached)
 router.get('/', async (req, res, next) => {
@@ -52,8 +26,11 @@ router.get('/', async (req, res, next) => {
       });
     }
     
-    // If not cached, return products and cache them
-    await setCache(cacheKey, products, 600); // Cache for 10 minutes
+    // If not cached, fetch from DB
+    const products = await Product.find().lean();
+    
+    // Cache them for 10 minutes
+    await setCache(cacheKey, products, 600);
     
     res.json({
       data: products,
@@ -83,8 +60,8 @@ router.get('/:id', async (req, res, next) => {
       });
     }
     
-    // Find product
-    const product = products.find((p) => p.id === id);
+    // Find product in DB
+    const product = await Product.findById(id).lean();
     
     if (!product) {
       return res.status(404).json({
@@ -130,13 +107,11 @@ router.get('/search/query', async (req, res, next) => {
       });
     }
     
-    // Search products
-    const results = products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q.toLowerCase()) ||
-        p.description.toLowerCase().includes(q.toLowerCase()) ||
-        p.category.toLowerCase().includes(q.toLowerCase())
-    );
+    // Search products in DB using text index
+    const results = await Product.find(
+      { $text: { $search: q } },
+      { score: { $meta: 'textScore' } }
+    ).sort({ score: { $meta: 'textScore' } }).lean();
     
     // Cache results
     await setCache(cacheKey, results, 300); // Cache for 5 minutes
