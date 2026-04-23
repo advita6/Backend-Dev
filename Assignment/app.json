@@ -1,0 +1,91 @@
+{
+  "name": "ecommerce-black-friday-platform",
+  "description": "High-traffic e-commerce platform for Black Friday/Cyber Monday",
+  "repository": "https://github.com/advita6/Backend-Dev",
+  "keywords": ["deployment", "scaling", "ecommerce"],
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "description": "Node environment",
+      "value": "production"
+    },
+    "MONGODB_URI": {
+      "description": "MongoDB Atlas connection string",
+      "required": true
+    },
+    "MONGODB_POOL_SIZE": {
+      "description": "MongoDB connection pool size",
+      "value": "100"
+    },
+    "REDIS_URL": {
+      "description": "Redis URL for caching",
+      "required": false
+    },
+    "JWT_SECRET": {
+      "description": "JWT secret key for authentication",
+      "required": true,
+      "generator": "secret"
+    },
+    "SESSION_SECRET": {
+      "description": "Session secret key",
+      "required": true,
+      "generator": "secret"
+    },
+    "NEW_RELIC_LICENSE_KEY": {
+      "description": "New Relic monitoring license key",
+      "required": false
+    },
+    "NEW_RELIC_APP_NAME": {
+      "description": "New Relic app name",
+      "value": "ecommerce-platform"
+    },
+    "AUTO_SCALE_ENABLED": {
+      "description": "Enable auto-scaling",
+      "value": "true"
+    },
+    "MIN_DYNOS": {
+      "description": "Minimum number of dynos",
+      "value": "2"
+    },
+    "MAX_DYNOS": {
+      "description": "Maximum number of dynos",
+      "value": "500"
+    },
+    "PAYMENT_GATEWAY_URL": {
+      "description": "Payment gateway API URL",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Logging level",
+      "value": "info"
+    }
+  },
+  "addons": [
+    {
+      "plan": "mongolab:sandbox",
+      "as": "MONGODB"
+    },
+    {
+      "plan": "rediscloud:30",
+      "as": "REDIS"
+    },
+    {
+      "plan": "newrelic:wayne",
+      "as": "NEW_RELIC"
+    }
+  ],
+  "formation": {
+    "web": {
+      "quantity": 2,
+      "size": "standard-2x"
+    },
+    "worker": {
+      "quantity": 1,
+      "size": "standard-1x"
+    }
+  }
+}
